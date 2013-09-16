@@ -1,0 +1,115 @@
+#!/bin/bash
+
+printUsageAndExit() {
+	echo "Usage: $0 ( m | u ) <config id>" >&2
+	exit 1
+}
+
+if [[ -z "$1" ]]; then
+	printUsageAndExit
+fi
+if [[ -z "$2" ]]; then
+	echo "Must specify mount config id" >&2
+	exit 1
+fi
+
+_cmd="$1"
+_cfg="$2"
+
+_confD="$( dirname "$0" )/chiron.conf.d"
+_realsD="/tmp/chiron-reals"
+
+catSetting() {
+	cat "${_confD}/${_cfg}" | grep "^${1}[[:space:]]" | cut -f 2-
+}
+
+echoFsTarget() {
+	echo ${_realsD}/${_cfg}/${1}
+}
+
+isMountpoint() {
+	local _mp
+	_mp="$( stat -c %m "$1" )"
+	[[ "$?" != "0" ]] && exit 1
+	[[ "$_mp" == "$1" ]] && return 0 || return 1
+}
+
+doMountReal() {
+	local _ix="$1"
+	local _fs="$2"
+	local _params="$3"
+
+	local _fsAlias="chiron__${_cfg}__${_ix}"
+	local _fsTarget="$( echoFsTarget "${_ix}" )"
+
+	[[ -e "$_fsTarget" ]] && isMountpoint "$_fsTarget"
+	if [[ "$?" == "0" ]]; then
+		echo "Mount point ${_fsTarget} is already in use" >&2
+		exit 1
+	fi
+
+	mkdir -p "$_fsTarget" || exit 1
+
+	case "$_fs" in
+		sshfs)
+			local _remote="$( echo "$_params" | cut -f 1 )"
+			local _opts="$( echo "$_params" | cut -s -f 2- )"
+			echo "Mounting \"$_remote\" via sshfs with options \"$_opts\""
+			sshfs -o idmap=user -o fsname="$_fsAlias" "$_remote" "$_fsTarget" || exit 1
+			;;
+		*)
+			echo "Unknown FS type at index $_ix: $_fs" >&2
+			exit 1
+			;;
+	esac
+}
+
+doUnmountReal() {
+	local _ix="$1"
+	local _fs="$2"
+
+	case "$_fs" in
+		sshfs)
+			local _fsTarget="$( echoFsTarget "$_ix" )"
+			echo "Unmounting sshfs at ${_fsTarget}"
+			fusermount -u "$_fsTarget"
+			;;
+		*)
+			echo "Unknown FS type at index $_ix: $_fs" >&2
+			exit 1
+			;;
+	esac
+}
+
+_realIx="0"
+case "$_cmd" in
+	"m")
+		_fsType=""
+		_fsParams=""
+		_chironParams=""
+		while read _fsType _fsParams; do
+			if (( "${_realIx}" > 0 )); then
+				_chironParams="${_chironParams}="
+			fi
+			let "_realIx++"
+			doMountReal "$_realIx" "$_fsType" "$_fsParams" || exit 1
+			_chironParams="${_chironParams}$( echoFsTarget "${_realIx}" )"
+		done <<< "$( catSetting real )"
+
+		_chironTarget="$( catSetting virtual )"
+		_chironAlias="chiron__${_cfg}"
+		echo "Mounting chironfs at ${_chironTarget} aliased as ${_chironAlias}"
+		chironfs --fsname "${_chironAlias}" --log "$( echoFsTarget log.chironfs )" "$_chironParams" "$_chironTarget"
+		;;
+	"u")
+		echo "Unmounting chironfs"
+		fusermount -u "$( catSetting virtual )"
+		while read _fsType _fsParams; do
+			let "_realIx++"
+			doUnmountReal "$_realIx" "$_fsType"
+		done <<< "$( catSetting real )"
+		;;
+	*)
+		printUsageAndExit
+		;;
+esac
