@@ -1,7 +1,7 @@
 #!/bin/bash
 
 printUsageAndExit() {
-	echo "Usage: $0 ( m | u ) <config id>" >&2
+	echo "Usage: $0 ( m | mr | u ) <config id>" >&2
 	exit 1
 }
 
@@ -64,6 +64,36 @@ doMountReal() {
 	esac
 }
 
+doMountReals() {
+		local _fsType=""
+		local _fsParams=""
+		local _realIx="0"
+		while read _fsType _fsParams; do
+			let "_realIx++"
+			doMountReal "$_realIx" "$_fsType" "$_fsParams" || exit 1
+		done <<< "$( catSetting real )"
+}
+
+doMountChiron() {
+		local _chironLine=""
+		local _ix=""
+		for _ix in $( seq $( catSetting real | wc -l ) ); do
+			if (( ${_ix} > 1 )); then
+				_chironLine="${_chironLine}="
+			fi
+			_chironLine="${_chironLine}$( echoFsTarget "${_ix}" )"
+		done
+		_chironTarget="$( catSetting virtual )"
+		_chironAlias="chiron__${_cfg}"
+		echo "Mounting chironfs at ${_chironTarget} aliased as ${_chironAlias}"
+		chironfs --fsname "${_chironAlias}" --log "$( echoFsTarget log.chironfs )" "$_chironLine" "$_chironTarget"
+}
+
+doUnmountChiron() {
+	echo "Unmounting chironfs"
+	fusermount -u "$( catSetting virtual )"
+}
+
 doUnmountReal() {
 	local _ix="$1"
 	local _fs="$2"
@@ -81,33 +111,25 @@ doUnmountReal() {
 	esac
 }
 
-_realIx="0"
+doUnmountReals() {
+	local _ix=0
+	while read _fsType _fsParams; do
+		let "_ix++"
+		doUnmountReal "$_ix" "$_fsType"
+	done <<< "$( catSetting real )"
+}
+
 case "$_cmd" in
 	"m")
-		_fsType=""
-		_fsParams=""
-		_chironParams=""
-		while read _fsType _fsParams; do
-			if (( "${_realIx}" > 0 )); then
-				_chironParams="${_chironParams}="
-			fi
-			let "_realIx++"
-			doMountReal "$_realIx" "$_fsType" "$_fsParams" || exit 1
-			_chironParams="${_chironParams}$( echoFsTarget "${_realIx}" )"
-		done <<< "$( catSetting real )"
-
-		_chironTarget="$( catSetting virtual )"
-		_chironAlias="chiron__${_cfg}"
-		echo "Mounting chironfs at ${_chironTarget} aliased as ${_chironAlias}"
-		chironfs --fsname "${_chironAlias}" --log "$( echoFsTarget log.chironfs )" "$_chironParams" "$_chironTarget"
+		doMountReals || exit 1
+		doMountChiron
+		;;
+	"mr")
+		doMountReals
 		;;
 	"u")
-		echo "Unmounting chironfs"
-		fusermount -u "$( catSetting virtual )"
-		while read _fsType _fsParams; do
-			let "_realIx++"
-			doUnmountReal "$_realIx" "$_fsType"
-		done <<< "$( catSetting real )"
+		doUnmountChiron || exit 1
+		doUnmountReals
 		;;
 	*)
 		printUsageAndExit
