@@ -55,7 +55,7 @@ doMountReal() {
 			local _remote="$( echo "$_params" | cut -f 1 )"
 			local _opts="$( echo "$_params" | cut -s -f 2- )"
 			echo "Mounting \"$_remote\" via sshfs with options \"$_opts\""
-			sshfs -o reconnect,idmap=user,compression=yes -o ssh_command='autossh -M 0 -o ServerAliveInterval=5 -o ServerAliveCountMax=2' -o fsname="$_fsAlias" "$_remote" "$_fsTarget" || exit 1
+			sshfs -o reconnect,idmap=user,compression=yes -o fsname="$_fsAlias" "$_remote" "$_fsTarget" || exit 1
 			;;
 		*)
 			echo "Unknown FS type at index $_ix: $_fs" >&2
